@@ -1,0 +1,142 @@
+All URIs listed in these docs are relative to the Open Legislation subdomain:legislation.nysenate.gov
+
+To make an API request using your key, set the key string as the value of the ‘key’ request parameter in the request URL.
+
+For example, if you wanted to get data for bill S1 of the 2015 session, your request would look something like this: legislation.nysenate.gov/api/3/bills/2015/S1?key=*your key goes here*
+
+In order to utilize the Laws API we’ll go over some quick terminology:
+
+Law Id: A three letter code that identifies the law, e.g. EDN for Education Law.
+
+Document Id: A string that identifies a particular document within a body of law. Contains the three letter law id so it can uniquely identify a document.
+
+Location Id; This is simply the document id without the three letter law id prefix.
+
+Published Date: Since the nature of laws are fairly temporal we keep track of changes to the laws using the published date. It’s possible to retrieve law documents roughly as they were represented during any week since October 2014.
+
+Get a list of law ids
+
+Usage
+
+(GET) /api/3/laws
+
+Response
+
+{
+    "success": true,
+    "message": "Listing of consolidated and unconsolidated NYS Laws",
+    "responseType": "law-info list",
+    "total": 134,
+    "offsetStart": 1,
+    "offsetEnd": 134,
+    "limit": 0,
+    "result": {
+        "items": [
+            {
+                "lawId": "ABC",
+                "name": "Alcoholic Beverage Control",
+                "lawType": "CONSOLIDATED",
+                "chapter": "3-B"
+            },
+            {
+                "lawId": "ABP",
+                "name": "Abandoned Property",
+                "lawType": "CONSOLIDATED",
+                "chapter": "1"
+            },
+    (truncated)
+
+
+Get the law structure
+
+Laws are represented as a collection of sub documents, each of which is structured within a hierarchy. The following call will provide the structure of the law.
+
+Usage
+
+(GET) /api/3/laws/{lawId}
+
+Examples
+
+/api/3/laws/ABC                  // Get latest law structure for ABC law
+/api/3/laws/TAX?date=2015-01-01  // Get law structure for TAX law as it appeared on or before 01/01/2015
+/api/3/laws/EDN?full=true        // Get latest law structure for EDN law as well as the text body of the law
+
+Response
+
+// /api/3/laws/RPT
+{
+    "success": true,
+    "message": "The document structure for RPT law",
+    "responseType": "law-tree",
+    "result": {
+    "lawVersion": {
+        "lawId": "RPT",                                // Three letter law id
+        "activeDate": "2015-01-02"                     // Date on which this law content was up to date
+    },
+    "info": {
+        "lawId": "RPT",
+        "name": "Real Property Tax",                   // Name of the law
+        "lawType": "CONSOLIDATED",                     // One of CONSOLIDATED, UNCONSOLIDATED, COURT_ACTS, RULES, MISC
+        "chapter": "50-A"                              // Chapter of law
+    },
+    "documents": {                                     // This is a repeating document structure
+        "lawId": "RPT",
+        "locationId": "-CH50-A",                       // The location id identifes this sub document within this law
+        "title": "Real Property Tax",                  // Title of this sub document if available.
+        "docType": "CHAPTER",
+        "docLevelId": "50-A",                          // The doc level id identifies the sub document within the current
+                                                       // level in the hierarchy. For example if 'docType' is ARTICLE
+                                                       // and docLevelId is 1, it means this is Article 1.
+
+        "activeDate": "2014-09-22",                    // Date this particular document was updated
+        "sequenceNo": 1,                               // Preserves ordering of sub documents
+        "repealedDate": null,                          // Date this document was repealed (if applicable)
+        "repealed": false,                             // This will be true if the document was repealed,
+                                                       // 'repealedDate' will be set with the date.
+        "text": null,                                  // Text of this document (only set when ?full=true)
+        "documents": {                                 // Contains the sub documents of this document
+            "items": [                                 // It's a recursive structure
+            {
+                "lawId": "RPT",
+                "locationId": "A1",
+                "title": "SHORT TITLE; DEFINITIONS",
+                "docType": "ARTICLE",
+                "docLevelId": "1",
+                "activeDate": "2014-09-22",
+                "sequenceNo": 2,
+                "repealedDate": null,
+                "text": null,
+                "documents": {
+                    "items": [
+                        {
+                            "lawId": "RPT",
+                            "locationId": "100",
+                            "title": "Short title",
+                            "docType": "SECTION",
+                            "docLevelId": "100",
+                            "activeDate": "2014-09-22",
+                            "sequenceNo": 3,
+                            "repealedDate": null,
+                            "text": null,
+                            "documents": {              // Note there are no sub documents for this doc
+                                "items": [],
+                                "size": 0
+                            },
+                            "repealed": false
+                        },
+    (truncated)
+
+
+Get a law sub document
+
+Usage
+
+(GET) /api/3/laws/{lawId}/{locationId}
+
+The lawId once again is the three letter code (e.g. EDN, TAX) and locationId is the identifier for the sub document. You can discover the locationId when you make an API request for the law structure (see above section). See the ‘locationId’ field for that response.
+
+Examples
+
+/api/3/laws/TAX/8/     // Get section 8 of Tax law
+/api/3/laws/EDN/A2/    // Get article 2 of Education law
+
