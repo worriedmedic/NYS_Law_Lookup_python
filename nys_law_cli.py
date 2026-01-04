@@ -153,7 +153,7 @@ def marker_indent(marker):
         level = 0
     elif re.match(r"^\d+$", clean):
         level = 3 if has_paren else 0
-    elif re.match(r"^[ivxlcdm]+$", clean, re.IGNORECASE):
+    elif re.match(r"^[ivx]+$", clean, re.IGNORECASE):
         level = 2
     elif re.match(r"^[A-Z]+$", clean):
         level = 4 if has_paren else 1
@@ -180,6 +180,16 @@ def apply_marker_indents(text):
     return "\n".join(lines)
 
 
+def apply_pen_last_sentence_break(text):
+    idx = text.rfind(". ")
+    if idx == -1:
+        return text
+    last_sentence = text[idx + 2 :].strip()
+    if not re.search(r"\bis a\b.*\b(felony|misdemeanor|violation)\b", last_sentence, re.IGNORECASE):
+        return text
+    return "{0}.\n{1}".format(text[:idx], text[idx + 2 :])
+
+
 def format_statute_text(text):
     # Break lines at subsection markers only when preceded by a period, comma, semicolon, or colon,
     # and optionally the word "and" or "or" after punctuation.
@@ -201,7 +211,7 @@ def format_statute_text(text):
     return pattern.sub(repl, text).strip()
 
 
-def write_pdf(path, title, body, header_lines=None):
+def write_pdf(path, title, body, header_lines=None, highlight_term=None):
     try:
         from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas
@@ -240,7 +250,12 @@ def write_pdf(path, title, body, header_lines=None):
             c.showPage()
             y = height - margin
             c.setFont("Times-Roman", 11)
-        c.drawString(margin, y, line)
+        if highlight_term:
+            _draw_highlighted_line(
+                c, margin, y, line, highlight_term, "Times-Roman", 11
+            )
+        else:
+            c.drawString(margin, y, line)
         y -= 14
     c.save()
 
@@ -262,6 +277,32 @@ def _wrap_preserve_indent(text, width=100):
         )
         lines.extend(wrapped.splitlines())
     return lines
+
+
+def _draw_highlighted_line(canvas, x, y, line, term, font_name, font_size):
+    term_lower = term.lower()
+    line_lower = line.lower()
+    idx = 0
+    matches = []
+    while True:
+        pos = line_lower.find(term_lower, idx)
+        if pos == -1:
+            break
+        matches.append((pos, pos + len(term)))
+        idx = pos + len(term)
+    if not matches:
+        canvas.drawString(x, y, line)
+        return
+
+    for start, end in matches:
+        prefix = line[:start]
+        match_text = line[start:end]
+        prefix_width = canvas.stringWidth(prefix, font_name, font_size)
+        match_width = canvas.stringWidth(match_text, font_name, font_size)
+        canvas.setFillColorRGB(1.0, 0.88, 0.5)
+        canvas.rect(x + prefix_width, y - 2, match_width, 12, fill=1, stroke=0)
+        canvas.setFillColorRGB(0, 0, 0)
+    canvas.drawString(x, y, line)
 
 
 def cmd_list_laws(args):
@@ -289,6 +330,8 @@ def cmd_statute(args):
     text = normalize_statute_text(text)
     text = format_statute_text(text)
     text = apply_marker_indents(text)
+    if args.law_id.upper() == "PEN":
+        text = apply_pen_last_sentence_break(text)
     output = "{0}\n\n{1}".format(title, text).strip()
     print(output)
     if args.pdf:

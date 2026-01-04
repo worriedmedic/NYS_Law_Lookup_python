@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 import re
+import os
 import threading
+import tempfile
+import subprocess
+import shutil
 import tkinter as tk
 from tkinter import filedialog
 from tkinter import messagebox
@@ -114,6 +118,7 @@ class App(ttk.Frame):
         self.master.rowconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)
         self.rowconfigure(5, weight=1)
+        self.rowconfigure(7, weight=0)
 
         ttk.Label(self, text="API Key (optional)").grid(row=0, column=0, sticky="w")
         ttk.Entry(self, textvariable=self.api_key_var, width=40).grid(
@@ -127,55 +132,103 @@ class App(ttk.Frame):
             row=1, column=2, sticky="w"
         )
 
-        ttk.Label(self, text="Law").grid(row=2, column=0, sticky="w")
+        law_row = ttk.Frame(self)
+        law_row.grid(row=2, column=0, columnspan=3, sticky="ew")
+        law_row.columnconfigure(1, weight=65)
+        law_row.columnconfigure(4, weight=35)
+
+        ttk.Label(law_row, text="Law").grid(row=0, column=0, sticky="w")
         self.law_combo = ttk.Combobox(
-            self,
+            law_row,
             textvariable=self.law_id_var,
             state="readonly",
-            width=40,
+            width=28,
             values=[],
         )
-        self.law_combo.grid(row=2, column=1, sticky="ew", padx=5)
+        self.law_combo.grid(row=0, column=1, sticky="ew", padx=5)
         self.law_combo.bind(
             "<<ComboboxSelected>>", lambda _evt: self._run_list_statutes()
         )
-        ttk.Button(self, text="Refresh Laws", command=self._run_load_laws).grid(
-            row=2, column=2, sticky="w"
+        ttk.Button(law_row, text="Refresh Laws", command=self._run_load_laws).grid(
+            row=0, column=2, sticky="w"
         )
-
-        ttk.Label(self, text="Location ID").grid(row=3, column=0, sticky="w")
-        ttk.Entry(self, textvariable=self.location_id_var, width=20).grid(
-            row=3, column=1, sticky="w", padx=5
-        )
+        ttk.Label(law_row, text="Statue").grid(row=0, column=3, sticky="w", padx=(10, 0))
+        statute_entry = ttk.Entry(law_row, textvariable=self.location_id_var, width=20)
+        statute_entry.grid(row=0, column=4, sticky="ew", padx=5)
+        statute_entry.bind("<Return>", lambda _evt: self._run_statute_text())
 
         btn_frame = ttk.Frame(self)
-        btn_frame.grid(row=2, column=2, rowspan=2, sticky="n")
+        btn_frame.grid(row=3, column=0, columnspan=3, sticky="w", pady=(5, 0))
         self.list_laws_btn = ttk.Button(
             btn_frame, text="List Laws", command=self._run_list_laws
         )
-        self.list_laws_btn.grid(row=0, column=0, sticky="ew", pady=2)
+        self.list_laws_btn.grid(row=0, column=0, sticky="w", padx=(0, 8))
         self.list_statutes_btn = ttk.Button(
             btn_frame,
             text="List Statutes",
             command=lambda: self._run_list_statutes(show_output=True),
         )
-        self.list_statutes_btn.grid(row=1, column=0, sticky="ew", pady=2)
+        self.list_statutes_btn.grid(row=0, column=1, sticky="w", padx=(0, 8))
         self.statute_text_btn = ttk.Button(
             btn_frame, text="Statute Text", command=self._run_statute_text
         )
-        self.statute_text_btn.grid(row=2, column=0, sticky="ew", pady=2)
-        self.save_pdf_btn = ttk.Button(
-            btn_frame, text="Save PDF", command=self._run_save_pdf
+        self.statute_text_btn.grid(row=0, column=2, sticky="w", padx=(0, 8))
+        search_frame = ttk.Frame(self)
+        search_frame.grid(row=6, column=0, columnspan=4, sticky="ew", pady=(6, 0))
+        search_frame.columnconfigure(1, weight=1)
+        ttk.Label(search_frame, text="Find in statute").grid(
+            row=0, column=0, sticky="w"
         )
-        self.save_pdf_btn.grid(row=3, column=0, sticky="ew", pady=2)
+        self.statute_search_var = tk.StringVar()
+        statute_search_entry = ttk.Entry(
+            search_frame, textvariable=self.statute_search_var
+        )
+        statute_search_entry.grid(row=0, column=1, sticky="ew", padx=5)
+        ttk.Button(search_frame, text="Find", command=self._find_in_statute).grid(
+            row=0, column=2, sticky="w", padx=(0, 6)
+        )
+        ttk.Button(search_frame, text="Prev", command=self._prev_statute_match).grid(
+            row=0, column=3, sticky="w", padx=(0, 6)
+        )
+        ttk.Button(search_frame, text="Next", command=self._next_statute_match).grid(
+            row=0, column=4, sticky="w", padx=(0, 6)
+        )
+        ttk.Button(search_frame, text="Clear", command=self._clear_statute_highlights).grid(
+            row=0, column=5, sticky="w"
+        )
+        statute_search_entry.bind("<Return>", lambda _evt: self._find_in_statute())
+
+        print_row = ttk.Frame(self)
+        print_row.grid(row=7, column=0, columnspan=4, sticky="e", pady=(6, 0), padx=(0, 5))
+        self.print_btn = ttk.Button(print_row, text="Print", command=self._run_print)
+        self.print_btn.grid(row=0, column=0, sticky="e", padx=(0, 8))
+        self.save_pdf_btn = ttk.Button(print_row, text="Save PDF", command=self._run_save_pdf)
+        self.save_pdf_btn.grid(row=0, column=1, sticky="e")
 
         statutes_header = ttk.Frame(self)
         statutes_header.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        statutes_header.columnconfigure(1, weight=1)
         ttk.Label(statutes_header, text="Statutes").grid(row=0, column=0, sticky="w")
-        ttk.Button(statutes_header, text="Search", command=self._open_search_window).grid(
-            row=0, column=1, sticky="e", padx=5
+        self.statute_list_search_var = tk.StringVar()
+        statute_list_search_entry = ttk.Entry(
+            statutes_header, textvariable=self.statute_list_search_var
         )
-        statutes_header.columnconfigure(0, weight=1)
+        statute_list_search_entry.grid(row=0, column=1, sticky="ew", padx=5)
+        ttk.Button(
+            statutes_header, text="Find", command=self._find_in_statute_list
+        ).grid(row=0, column=2, sticky="w", padx=(0, 6))
+        ttk.Button(
+            statutes_header, text="Prev", command=self._prev_statute_list_match
+        ).grid(row=0, column=3, sticky="w", padx=(0, 6))
+        ttk.Button(
+            statutes_header, text="Next", command=self._next_statute_list_match
+        ).grid(row=0, column=4, sticky="w", padx=(0, 6))
+        ttk.Button(
+            statutes_header, text="Clear", command=self._clear_statute_list_highlights
+        ).grid(row=0, column=5, sticky="w")
+        statute_list_search_entry.bind(
+            "<Return>", lambda _evt: self._find_in_statute_list()
+        )
         self.paned = ttk.Panedwindow(self, orient="vertical")
         self.paned.grid(row=5, column=0, columnspan=4, sticky="nsew", pady=(5, 0))
 
@@ -302,8 +355,12 @@ class App(ttk.Frame):
                 self._statute_path_lookup = path_lookup
                 self.statute_list.delete(0, "end")
                 for location_id, title in sections:
+                    title = title.strip()
+                    if title.startswith("{0} - ".format(location_id)):
+                        title = title[len(location_id) + 3 :]
                     label = "{0} - {1}".format(location_id, title)
                     self.statute_list.insert("end", label)
+
                 if show_output:
                     self._set_output(output)
                 elif not sections:
@@ -324,6 +381,8 @@ class App(ttk.Frame):
         text = law_api.normalize_statute_text(text)
         text = law_api.format_statute_text(text)
         text = law_api.apply_marker_indents(text)
+        if law_id.upper() == "PEN":
+            text = law_api.apply_pen_last_sentence_break(text)
         return title, text
 
     def _run_statute_text(self):
@@ -336,7 +395,11 @@ class App(ttk.Frame):
         def work():
             title, text = self._fetch_statute_text(law_id, location_id, key)
             output = "{0}\n\n{1}".format(title, text).strip()
-            self.master.after(0, lambda: self._set_output(output))
+            def update():
+                self._set_output(output)
+                self._select_statute_in_list(location_id)
+
+            self.master.after(0, update)
 
         self._run_worker(work)
 
@@ -346,7 +409,11 @@ class App(ttk.Frame):
         if not law_id or not location_id:
             raise ValueError("Law ID and Location ID are required.")
         key = self._get_key()
-        default_name = "{0}_{1}.pdf".format(law_id, location_id)
+        title = self._get_statute_title(location_id)
+        suffix = location_id
+        if title:
+            suffix = "{0}_{1}".format(location_id, self._sanitize_filename(title))
+        default_name = "{0}_{1}.pdf".format(law_id, suffix)
         path = filedialog.asksaveasfilename(
             title="Save PDF",
             defaultextension=".pdf",
@@ -359,10 +426,52 @@ class App(ttk.Frame):
         def work():
             title, text = self._fetch_statute_text(law_id, location_id, key)
             header_lines = self._build_pdf_header(law_id, location_id)
-            law_api.write_pdf(path, title, text, header_lines=header_lines)
+            highlight_term = self.statute_search_var.get().strip()
+            law_api.write_pdf(
+                path,
+                title,
+                text,
+                header_lines=header_lines,
+                highlight_term=highlight_term if highlight_term else None,
+            )
             self.master.after(
                 0, lambda: messagebox.showinfo("Saved", "PDF written to {0}".format(path))
             )
+
+        self._run_worker(work)
+
+    def _run_print(self):
+        law_id = self._resolve_law_id()
+        location_id = self._resolve_location_id()
+        if not law_id or not location_id:
+            raise ValueError("Law ID and Location ID are required.")
+        key = self._get_key()
+        if not shutil.which("lp") and not shutil.which("lpr"):
+            raise ValueError("No system print command found (lp or lpr).")
+
+        def work():
+            title, text = self._fetch_statute_text(law_id, location_id, key)
+            header_lines = self._build_pdf_header(law_id, location_id)
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                pdf_path = tmp.name
+            try:
+                law_api.write_pdf(
+                    pdf_path,
+                    title,
+                    text,
+                    header_lines=header_lines,
+                    highlight_term=self.statute_search_var.get().strip() or None,
+                )
+                if shutil.which("lp"):
+                    subprocess.check_call(["lp", pdf_path])
+                else:
+                    subprocess.check_call(["lpr", pdf_path])
+                self.master.after(0, lambda: messagebox.showinfo("Printed", "Print job sent."))
+            finally:
+                try:
+                    os.unlink(pdf_path)
+                except Exception:
+                    pass
 
         self._run_worker(work)
 
@@ -395,6 +504,137 @@ class App(ttk.Frame):
         if location_id:
             self.location_id_var.set(location_id)
             self._run_statute_text()
+
+    def _select_statute_in_list(self, location_id):
+        for idx, item in enumerate(self._statute_lookup):
+            if item[0] == location_id:
+                self.statute_list.selection_clear(0, "end")
+                self.statute_list.selection_set(idx)
+                self.statute_list.see(idx)
+                break
+
+    def _get_statute_title(self, location_id):
+        for item in self._statute_lookup:
+            if item[0] == location_id:
+                return item[1]
+        return ""
+
+    def _sanitize_filename(self, name):
+        cleaned = re.sub(r"[^\w\- ]+", "", name)
+        cleaned = re.sub(r"\s+", "_", cleaned).strip("_")
+        return cleaned[:60]
+
+    def _find_in_statute(self):
+        term = self.statute_search_var.get().strip()
+        self.output.tag_remove("search_match", "1.0", "end")
+        self.output.tag_remove("search_current", "1.0", "end")
+        if not term:
+            self._statute_matches = []
+            self._statute_match_index = -1
+            return
+        start = "1.0"
+        self._statute_matches = []
+        while True:
+            pos = self.output.search(term, start, stopindex="end", nocase=True)
+            if not pos:
+                break
+            end = "{0}+{1}c".format(pos, len(term))
+            self.output.tag_add("search_match", pos, end)
+            self._statute_matches.append((pos, end))
+            start = end
+        self.output.tag_config("search_match", background="#ffe08a")
+        self.output.tag_config("search_current", background="#ffbf66")
+        if self._statute_matches:
+            self._statute_match_index = 0
+            self._show_statute_match(self._statute_match_index)
+        else:
+            self._statute_match_index = -1
+
+    def _show_statute_match(self, index):
+        if not self._statute_matches:
+            return
+        index = max(0, min(index, len(self._statute_matches) - 1))
+        self._statute_match_index = index
+        self.output.tag_remove("search_current", "1.0", "end")
+        start, end = self._statute_matches[index]
+        self.output.tag_add("search_current", start, end)
+        self.output.see(start)
+
+    def _next_statute_match(self):
+        if not getattr(self, "_statute_matches", None):
+            self._find_in_statute()
+        if not self._statute_matches:
+            return
+        next_index = (self._statute_match_index + 1) % len(self._statute_matches)
+        self._show_statute_match(next_index)
+
+    def _prev_statute_match(self):
+        if not getattr(self, "_statute_matches", None):
+            self._find_in_statute()
+        if not self._statute_matches:
+            return
+        prev_index = (self._statute_match_index - 1) % len(self._statute_matches)
+        self._show_statute_match(prev_index)
+
+    def _clear_statute_highlights(self):
+        self.output.tag_remove("search_match", "1.0", "end")
+        self.output.tag_remove("search_current", "1.0", "end")
+        self._statute_matches = []
+        self._statute_match_index = -1
+
+    def _find_in_statute_list(self):
+        term = self.statute_list_search_var.get().strip().lower()
+        self.statute_list.selection_clear(0, "end")
+        if not term:
+            self._statute_list_matches = []
+            self._statute_list_match_index = -1
+            return
+        matches = []
+        for idx in range(self.statute_list.size()):
+            label = self.statute_list.get(idx).lower()
+            if term in label:
+                matches.append(idx)
+        self._statute_list_matches = matches
+        if matches:
+            self._statute_list_match_index = 0
+            self._show_statute_list_match(self._statute_list_match_index)
+        else:
+            self._statute_list_match_index = -1
+
+    def _show_statute_list_match(self, index):
+        if not self._statute_list_matches:
+            return
+        index = max(0, min(index, len(self._statute_list_matches) - 1))
+        self._statute_list_match_index = index
+        match_index = self._statute_list_matches[index]
+        self.statute_list.selection_clear(0, "end")
+        self.statute_list.selection_set(match_index)
+        self.statute_list.see(match_index)
+
+    def _next_statute_list_match(self):
+        if not getattr(self, "_statute_list_matches", None):
+            self._find_in_statute_list()
+        if not self._statute_list_matches:
+            return
+        next_index = (self._statute_list_match_index + 1) % len(
+            self._statute_list_matches
+        )
+        self._show_statute_list_match(next_index)
+
+    def _prev_statute_list_match(self):
+        if not getattr(self, "_statute_list_matches", None):
+            self._find_in_statute_list()
+        if not self._statute_list_matches:
+            return
+        prev_index = (self._statute_list_match_index - 1) % len(
+            self._statute_list_matches
+        )
+        self._show_statute_list_match(prev_index)
+
+    def _clear_statute_list_highlights(self):
+        self.statute_list.selection_clear(0, "end")
+        self._statute_list_matches = []
+        self._statute_list_match_index = -1
 
     def _build_pdf_header(self, law_id, location_id):
         header = []
@@ -540,6 +780,7 @@ class App(ttk.Frame):
 
 def main():
     root = tk.Tk()
+    root.geometry("1200x850")
     app = App(root)
     app._run_load_laws()
     root.mainloop()
